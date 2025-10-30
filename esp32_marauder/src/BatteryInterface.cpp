@@ -25,7 +25,6 @@ void BatteryInterface::RunSetup() {
   byte addr;
 
   #ifdef HAS_BATTERY
-
     Serial.println("Checking for battery monitors...");
 
     #ifndef HAS_AXP2101
