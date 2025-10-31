@@ -509,8 +509,11 @@ void Display::displayBuffer(bool do_clear)
           delay(print_delay_1);
           yDraw = scroll_line(TFT_RED);
           tft.setCursor(xPos, yDraw);
-          tft.setTextColor(TFT_GREEN, TFT_BLACK);
-          tft.print(display_buffer->shift());
+          // Use processAndPrintString so any color tokens (e.g. ;grn;, ;red;, ;cyn;) are interpreted
+          {
+            String line = display_buffer->shift();
+            this->processAndPrintString(tft, line);
+          }
           printing = false;
           delay(print_delay_2);
         }

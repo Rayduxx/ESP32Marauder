@@ -18,25 +18,6 @@
 #include "SDInterface.h"
 #include "settings.h"
 
-#ifdef HAS_BUTTONS
-  #include "Switches.h"
-  #if (U_BTN >= 0)
-    extern Switches u_btn;
-  #endif
-  #if (D_BTN >= 0)
-    extern Switches d_btn;
-  #endif
-  #if (L_BTN >= 0)
-    extern Switches l_btn;
-  #endif
-  #if (R_BTN >= 0)
-    extern Switches r_btn;
-  #endif
-  #if (C_BTN >= 0)
-    extern Switches c_btn;
-  #endif
-#endif
-
 extern WiFiScan wifi_scan_obj;
 extern SDInterface sd_obj;
 extern BatteryInterface battery_obj;
@@ -263,6 +244,9 @@ class MenuFunctions
   public:
     MenuFunctions();
 
+    // Request LVGL deinitialization from a safe context (deferred)
+    void requestDeinitLVGL();
+
     Menu* current_menu;
     Menu clearSSIDsMenu;
     Menu clearAPsMenu;
@@ -309,6 +293,8 @@ class MenuFunctions
     void main(uint32_t currentTime);
     void RunSetup();
     void orientDisplay();
+  // Internal flag used to indicate a deferred LVGL deinit should run
+  bool request_deinit_lvgl = false;
 };
 
 

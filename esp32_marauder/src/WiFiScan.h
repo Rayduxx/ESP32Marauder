@@ -136,6 +136,8 @@
 #define WIFI_SCAN_SMTP 67
 #define WIFI_SCAN_RDP 68
 #define WIFI_HOSTSPOT 69 // Nice
+#define BT_SCAN_AIRTAG_MON 70
+
 
 #define WIFI_ATTACK_FUNNY_BEACON 99 
 
@@ -216,16 +218,14 @@ struct AirTag {
     std::vector<uint8_t> payload; // Payload data
     uint16_t payloadSize;
     bool selected;
-};
+    int8_t rssi;
+  uint32_t last_seen;
+  };
 
 struct Flipper {
   String mac;
   String name;
 };
-
-#ifdef HAS_PSRAM
-  extern struct mac_addr* mac_history;
-#endif
 
 class WiFiScan
 {
@@ -688,7 +688,7 @@ class WiFiScan
       wifi_country_t country = {
         .cc = "PH",
         .schan = 1,
-        .nchan = 13,
+        .nchan = 13,f
         .policy = WIFI_COUNTRY_POLICY_AUTO,
       };
 
