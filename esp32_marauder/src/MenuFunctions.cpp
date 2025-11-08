@@ -10,6 +10,9 @@ PROGMEM lv_obj_t *ta1;
 PROGMEM lv_obj_t *ta2;
 PROGMEM lv_obj_t *save_name;
 
+// Runtime flag for LED polarity (false = active-high, true = active-low)
+static bool user_led_inverted = false;
+
 MenuFunctions::MenuFunctions()
 {
 }
@@ -841,17 +844,12 @@ void MenuFunctions::buttonSelected(int b, int x)
 void MenuFunctions::displayMenuButtons()
 {
 #ifdef HAS_ILI9341
-  // Draw lines to show each menu button
-  for (int i = 0; i < 3; i++)
-  {
-    // Draw horizontal line on left
-    display_obj.tft.drawLine(0, TFT_HEIGHT / 3 * (i), (TFT_WIDTH / 12) / 2, TFT_HEIGHT / 3 * (i), TFT_FARTGRAY);
-    // Draw horizontal line on right
-    display_obj.tft.drawLine(TFT_WIDTH - 1 - ((TFT_WIDTH / 12) / 2), TFT_HEIGHT / 3 * (i), TFT_WIDTH, TFT_HEIGHT / 3 * (i), TFT_FARTGRAY);
-    // Draw vertical line on left
-    display_obj.tft.drawLine(0, (TFT_HEIGHT / 3 * (i)) - ((TFT_WIDTH / 12) / 2), 0, (TFT_HEIGHT / 3 * (i)) + ((TFT_WIDTH / 12) / 2), TFT_FARTGRAY);
-    // Draw vertical line on right
-    display_obj.tft.drawLine(TFT_WIDTH - 1, (TFT_HEIGHT / 3 * (i)) - ((TFT_WIDTH / 12) / 2), TFT_WIDTH - 1, (TFT_HEIGHT / 3 * (i)) + ((TFT_WIDTH / 12) / 2), TFT_FARTGRAY);
+  // Draw the interactive bottom 3-button zone (Up | OK | Down)
+  // This replaces the old thin guide lines that caused small gray artifacts.
+  for (int j = 0; j < 3; j++) {
+    uint16_t idx = BUTTON_ARRAY_LEN + j;
+    // Ensure the button was initialised before drawing
+    display_obj.key[idx].drawButton(false);
   }
 #endif
 }
@@ -2858,21 +2856,77 @@ void MenuFunctions::RunSetup()
     this->changeMenu(ledControlMenu.parentMenu, true); 
   });
   this->addNodes(&ledControlMenu, "Turn ON", TFTGREEN, NULL, UPDATE, [this]() {
-    digitalWrite(2, HIGH);  // GPIO 2 - Red LED ON
-    Serial.println("Red LED turned ON"); 
+    // Use runtime polarity flag; default = active-high
+  if (user_led_inverted) {
+#ifdef USER_LED_PIN
+      digitalWrite(USER_LED_PIN, LOW);
+#else
+      digitalWrite(2, LOW);
+#endif
+      Serial.println("User LED turned ON (inverted)");
+    } else {
+#ifdef USER_LED_PIN
+      digitalWrite(USER_LED_PIN, HIGH);
+#else
+      digitalWrite(2, HIGH);
+#endif
+      Serial.println("User LED turned ON");
+    }
   });
   this->addNodes(&ledControlMenu, "Turn OFF", TFTRED, NULL, UPDATE, [this]() {
-    digitalWrite(2, LOW);   // GPIO 2 - Red LED OFF
-    Serial.println("Red LED turned OFF"); 
+  if (user_led_inverted) {
+#ifdef USER_LED_PIN
+      digitalWrite(USER_LED_PIN, HIGH);
+#else
+      digitalWrite(2, HIGH);
+#endif
+      Serial.println("User LED turned OFF (inverted)");
+    } else {
+#ifdef USER_LED_PIN
+      digitalWrite(USER_LED_PIN, LOW);
+#else
+      digitalWrite(2, LOW);
+#endif
+      Serial.println("User LED turned OFF");
+    }
   });
   this->addNodes(&ledControlMenu, "Blink", TFTCYAN, NULL, UPDATE, [this]() {
     for (int i = 0; i < 5; i++) {
-      digitalWrite(2, HIGH);
-      delay(200);
-      digitalWrite(2, LOW);
-      delay(200);
+      if (user_led_inverted) {
+#ifdef USER_LED_PIN
+        digitalWrite(USER_LED_PIN, LOW);
+#else
+        digitalWrite(2, LOW);
+#endif
+        delay(200);
+#ifdef USER_LED_PIN
+        digitalWrite(USER_LED_PIN, HIGH);
+#else
+        digitalWrite(2, HIGH);
+#endif
+        delay(200);
+      } else {
+#ifdef USER_LED_PIN
+        digitalWrite(USER_LED_PIN, HIGH);
+#else
+        digitalWrite(2, HIGH);
+#endif
+        delay(200);
+#ifdef USER_LED_PIN
+        digitalWrite(USER_LED_PIN, LOW);
+#else
+        digitalWrite(2, LOW);
+#endif
+        delay(200);
+      }
     }
-    Serial.println("Red LED blinked"); 
+    Serial.println("User LED blinked"); 
+  });
+
+  // Allow toggling LED polarity at runtime in case wiring is active-low
+  this->addNodes(&ledControlMenu, "Invert LED Logic", TFTLIGHTGREY, NULL, UPDATE, [this]() {
+    user_led_inverted = !user_led_inverted;
+    Serial.println(String("User LED inverted set to: ") + (user_led_inverted ? "true" : "false"));
   });
 
   // Select update
@@ -3208,14 +3262,30 @@ void MenuFunctions::buildButtons(Menu *menu, int starting_index, String button_n
     display_obj.key[i].setLabelDatum(BUTTON_PADDING - (KEY_W / 2), 2, ML_DATUM);
   }
 
-  for (int i = BUTTON_ARRAY_LEN; i < BUTTON_ARRAY_LEN + 3; i++)
+  // Bottom touch controls: three side-by-side boxes for Up | OK | Down
   {
-    uint16_t x = TFT_WIDTH / 2;
-    uint16_t y = TFT_HEIGHT / 3 * (i - BUTTON_ARRAY_LEN) + ((TFT_HEIGHT / 3) / 2);
-    uint16_t w = TFT_WIDTH;
-    uint16_t h = TFT_HEIGHT / 3 - 1;
+    // make touch targets taller for easier tapping and centered horizontally
+    uint16_t btn_w = TFT_WIDTH / 3;
+    uint16_t btn_h = KEY_H + 12; // increase height for better touch
+    uint16_t btn_y = TFT_HEIGHT - btn_h - 4; // 4px bottom margin
 
-    display_obj.key[i].initButton(&display_obj.tft, x, y, w, h, TFT_LIGHTGREY, TFT_BLACK, TFT_BLACK, (char *)"Chicken", 1);
+    // compute a small left margin so the 3 buttons are perfectly centered
+    uint16_t total_w = btn_w * 3;
+    uint16_t left_margin = (TFT_WIDTH > total_w) ? ((TFT_WIDTH - total_w) / 2) : 0;
+
+    // Left = UP (index 0), Middle = OK (index 1), Right = DOWN (index 2)
+    const char *labels[3] = { "Up", "OK", "Down" };
+
+    for (int j = 0; j < 3; j++) {
+      // TFT_eSPI_Button in this project expects x,y to be the button center
+      uint16_t cx = left_margin + j * btn_w + (btn_w / 2); // center x
+      uint16_t cy = btn_y + (btn_h / 2); // center y
+      uint16_t idx = BUTTON_ARRAY_LEN + j;
+      // Use same outline and fill color to minimize visible border thickness
+      display_obj.key[idx].initButton(&display_obj.tft, cx, cy, btn_w, btn_h, TFT_LIGHTGREY, TFT_LIGHTGREY, TFT_BLACK, (char *)labels[j], 2);
+      // center the label (x_delta=0, y_delta=0, datum=MC_DATUM)
+      display_obj.key[idx].setLabelDatum(0, 0, MC_DATUM);
+    }
   }
 }
 

