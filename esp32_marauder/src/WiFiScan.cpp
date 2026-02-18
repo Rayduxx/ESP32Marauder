@@ -2251,13 +2251,17 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color)
   
     #ifdef HAS_TOUCH
       display_obj.tft.init();
-      display_obj.tft.setRotation(1);
+      // Keep the display in the project's configured orientation (portrait) instead of forcing landscape
+      display_obj.tft.setRotation(SCREEN_ORIENTATION);
+      // Clear any previously drawn menu/ui so LVGL can render cleanly
+      display_obj.clearScreen();
     #endif
     
     #ifndef HAS_CYD_TOUCH
-      display_obj.setCalData(true);
+      // Use portrait calibration
+      display_obj.setCalData(false);
     #else
-      //display_obj.touchscreen.setRotation(1);
+      //display_obj.touchscreen.setRotation(SCREEN_ORIENTATION);
     #endif
     
     #ifdef HAS_TOUCH

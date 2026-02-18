@@ -90,6 +90,8 @@ PROGMEM static void ta_event_cb(lv_obj_t * ta, lv_event_t event);
 PROGMEM static void join_wifi_keyboard_event_cb(lv_obj_t * keyboard, lv_event_t event);
 PROGMEM static void start_ap_keyboard_event_cb(lv_obj_t * keyboard, lv_event_t event);
 PROGMEM static void add_ssid_keyboard_event_cb(lv_obj_t * keyboard, lv_event_t event);
+PROGMEM static void prev_field_cb(lv_obj_t * btn, lv_event_t event);
+PROGMEM static void next_field_cb(lv_obj_t * btn, lv_event_t event);
 PROGMEM static void html_list_cb(lv_obj_t * btn, lv_event_t event);
 PROGMEM static void ap_list_cb(lv_obj_t * btn, lv_event_t event);
 PROGMEM static void ap_info_list_cb(lv_obj_t * btn, lv_event_t event);

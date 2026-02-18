@@ -9,6 +9,8 @@ PROGMEM lv_obj_t *slider_label;
 PROGMEM lv_obj_t *ta1;
 PROGMEM lv_obj_t *ta2;
 PROGMEM lv_obj_t *save_name;
+// Track the currently active LVGL textarea for Prev/Next navigation
+static lv_obj_t *active_ta = NULL;
 
 // Runtime flag for LED polarity (false = active-high, true = active-low)
 static bool user_led_inverted = false;
@@ -57,6 +59,10 @@ bool my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data)
 
   if (!touched)
   {
+    // No touch detected: report released state to LVGL and exit
+    data->state = LV_INDEV_STATE_REL;
+    data->point.x = 0;
+    data->point.y = 0;
     return false;
   }
 
@@ -73,8 +79,20 @@ bool my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data)
 
     data->state = touched ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
 
-    data->point.x = touchX;
-    data->point.y = touchY;
+    // Ensure coordinates fit within LVGL display resolution
+    lv_coord_t hor = lv_disp_get_hor_res(NULL);
+    lv_coord_t ver = lv_disp_get_ver_res(NULL);
+
+    // clamp values to avoid out-of-bounds coordinates that break hit testing
+    lv_coord_t px = (lv_coord_t)touchX;
+    lv_coord_t py = (lv_coord_t)touchY;
+    if (px < 0) px = 0;
+    if (py < 0) py = 0;
+    if (px >= hor) px = hor - 1;
+    if (py >= ver) py = ver - 1;
+
+    data->point.x = px;
+    data->point.y = py;
   }
 
   return false;
@@ -90,8 +108,10 @@ void MenuFunctions::initLVGL()
 
   lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
-  disp_drv.hor_res = WIDTH_1;
-  disp_drv.ver_res = HEIGHT_1;
+  // Make LVGL use the actual TFT dimensions so widgets (keyboard) match orientation
+  extern Display display_obj;
+  disp_drv.hor_res = display_obj.tft.width();
+  disp_drv.ver_res = display_obj.tft.height();
   disp_drv.flush_cb = my_disp_flush;
   disp_drv.buffer = &disp_buf;
   lv_disp_drv_register(&disp_drv);
@@ -624,17 +644,25 @@ void MenuFunctions::addSSIDGFX()
   extern LinkedList<ssid> *ssids;
 
   String display_string = "";
-  // Create a keyboard and apply the styles
+  // Create a keyboard and apply the styles (use TFT dims so it stays portrait)
   kb = lv_keyboard_create(lv_scr_act(), NULL);
-  lv_obj_set_size(kb, LV_HOR_RES, LV_VER_RES / 2);
+  extern Display display_obj;
+  // make keyboard a bit shorter (~40% of display height) so more of the text areas are visible
+  uint16_t disp_h = display_obj.tft.height();
+  uint16_t kb_h = (disp_h * 40) / 100; // 40% of screen height
+  if (kb_h < 80) kb_h = 80; // enforce a sensible minimum
+  lv_obj_set_size(kb, display_obj.tft.width(), kb_h);
+  lv_obj_align(kb, NULL, LV_ALIGN_IN_BOTTOM_MID, 0, 0);
   lv_obj_set_event_cb(kb, add_ssid_keyboard_event_cb);
 
   // Create one text area
   // Store all SSIDs
   ta1 = lv_textarea_create(lv_scr_act(), NULL);
   lv_textarea_set_one_line(ta1, false);
-  lv_obj_set_width(ta1, LV_HOR_RES);
-  lv_obj_set_height(ta1, (LV_VER_RES / 2) - 35);
+  // Textarea spans full width above the keyboard and uses remaining height
+  lv_obj_set_width(ta1, display_obj.tft.width() - 10);
+  uint16_t ta1_h = disp_h - kb_h - 40; // leave some margin for labels/padding
+  lv_obj_set_height(ta1, ta1_h);
   lv_obj_set_pos(ta1, 5, 20);
   lv_textarea_set_cursor_hidden(ta1, true);
   lv_obj_align(ta1, NULL, LV_ALIGN_IN_TOP_MID, 0, 0);
@@ -645,7 +673,8 @@ void MenuFunctions::addSSIDGFX()
   ta2 = lv_textarea_create(lv_scr_act(), ta1);
   lv_textarea_set_cursor_hidden(ta2, false);
   lv_textarea_set_one_line(ta2, true);
-  lv_obj_align(ta2, NULL, LV_ALIGN_IN_TOP_MID, 0, (LV_VER_RES / 2) - 35);
+  // place the small entry textarea near the bottom of the large textarea area
+  lv_obj_set_pos(ta2, 5, 20 + ta1_h - 30);
   lv_textarea_set_text(ta2, "");
   lv_textarea_set_placeholder_text(ta2, text_table1[1]);
 
@@ -656,8 +685,24 @@ void MenuFunctions::addSSIDGFX()
   lv_textarea_set_text(ta1, display_string.c_str());
 
   // Focus it on one of the text areas to start
-  lv_keyboard_set_textarea(kb, ta2);
+  lv_keyboard_set_textarea(kb, ta1);
+  active_ta = ta1;
   lv_keyboard_set_cursor_manage(kb, true);
+
+  // Add Prev/Next buttons for join WiFi screen
+  lv_obj_t *btn_prev = lv_btn_create(lv_scr_act(), NULL);
+  lv_obj_set_size(btn_prev, 70, 32);
+  lv_obj_align(btn_prev, kb, LV_ALIGN_OUT_TOP_LEFT, 10, -6);
+  lv_obj_t *lbl_prev = lv_label_create(btn_prev, NULL);
+  lv_label_set_text(lbl_prev, "Prev");
+  lv_obj_set_event_cb(btn_prev, prev_field_cb);
+
+  lv_obj_t *btn_next = lv_btn_create(lv_scr_act(), NULL);
+  lv_obj_set_size(btn_next, 70, 32);
+  lv_obj_align(btn_next, kb, LV_ALIGN_OUT_TOP_RIGHT, -10, -6);
+  lv_obj_t *lbl_next = lv_label_create(btn_next, NULL);
+  lv_label_set_text(lbl_next, "Next");
+  lv_obj_set_event_cb(btn_next, next_field_cb);
 }
 
 // Keyboard callback dedicated to joining wifi
@@ -698,8 +743,34 @@ void add_ssid_keyboard_event_cb(lv_obj_t *keyboard, lv_event_t event)
   }
 }
 
+// Prev/Next field callbacks for LVGL keyboard screens
+void prev_field_cb(lv_obj_t *btn, lv_event_t event)
+{
+  if (event != LV_EVENT_CLICKED) return;
+  if (!active_ta) return;
+  // Toggle between ta1 and ta2
+  lv_obj_t *target = (active_ta == ta1) ? ta2 : ta1;
+  if (kb != NULL && target != NULL) {
+    lv_keyboard_set_textarea(kb, target);
+    active_ta = target;
+  }
+}
+
+void next_field_cb(lv_obj_t *btn, lv_event_t event)
+{
+  if (event != LV_EVENT_CLICKED) return;
+  if (!active_ta) return;
+  // Toggle between ta1 and ta2 (same as prev for 2 fields)
+  lv_obj_t *target = (active_ta == ta2) ? ta1 : ta2;
+  if (kb != NULL && target != NULL) {
+    lv_keyboard_set_textarea(kb, target);
+    active_ta = target;
+  }
+}
+
 void MenuFunctions::joinWiFiGFX(String essid, bool start_ap)
 {
+  extern Display display_obj;
 
   // Create one text area
   ta1 = lv_textarea_create(lv_scr_act(), NULL);
@@ -725,9 +796,14 @@ void MenuFunctions::joinWiFiGFX(String essid, bool start_ap)
   lv_textarea_set_text(ta2, "");
   lv_obj_align(pw_label, ta2, LV_ALIGN_OUT_TOP_LEFT, 0, 0);
 
-  // Create a keyboard and apply the styles
+  // Create a keyboard and apply the styles (use TFT dims so it stays portrait)
   kb = lv_keyboard_create(lv_scr_act(), NULL);
-  lv_obj_set_size(kb, LV_HOR_RES, LV_VER_RES / 2);
+  // shorter keyboard so form fields remain visible
+  uint16_t disp_h = display_obj.tft.height();
+  uint16_t kb_h = (disp_h * 40) / 100; // 40% of screen height
+  if (kb_h < 80) kb_h = 80;
+  lv_obj_set_size(kb, display_obj.tft.width(), kb_h);
+  lv_obj_align(kb, NULL, LV_ALIGN_IN_BOTTOM_MID, 0, 0);
 
   if (!start_ap)
     lv_obj_set_event_cb(kb, join_wifi_keyboard_event_cb);
@@ -736,7 +812,25 @@ void MenuFunctions::joinWiFiGFX(String essid, bool start_ap)
 
   // Focus it on one of the text areas to start
   lv_keyboard_set_textarea(kb, ta1);
+  active_ta = ta1;
   lv_keyboard_set_cursor_manage(kb, true);
+
+  // Add Prev/Next buttons for join WiFi screen
+  lv_obj_t *btn_prev = lv_btn_create(lv_scr_act(), NULL);
+  lv_obj_set_size(btn_prev, 70, 32);
+  lv_obj_align(btn_prev, kb, LV_ALIGN_OUT_TOP_LEFT, 10, -6);
+  lv_obj_t *lbl_prev = lv_label_create(btn_prev, NULL);
+  lv_label_set_text(lbl_prev, "Prev");
+  lv_obj_set_event_cb(btn_prev, prev_field_cb);
+
+  lv_obj_t *btn_next = lv_btn_create(lv_scr_act(), NULL);
+  lv_obj_set_size(btn_next, 70, 32);
+  lv_obj_align(btn_next, kb, LV_ALIGN_OUT_TOP_RIGHT, -10, -6);
+  lv_obj_t *lbl_next = lv_label_create(btn_next, NULL);
+  lv_label_set_text(lbl_next, "Next");
+  lv_obj_set_event_cb(btn_next, next_field_cb);
+
+  lv_obj_set_width(ta1, (display_obj.tft.width() / 2) - 20);
 }
 
 void join_wifi_keyboard_event_cb(lv_obj_t *keyboard, lv_event_t event)
@@ -801,6 +895,8 @@ void ta_event_cb(lv_obj_t *ta, lv_event_t event)
   {
     if (kb != NULL)
       lv_keyboard_set_textarea(kb, ta);
+    // remember which textarea is active
+    active_ta = ta;
   }
 }
 
@@ -2198,12 +2294,12 @@ void MenuFunctions::RunSetup()
           ProbeReqSsid new_ssid = probe_req_ssids->get(i);
           new_ssid.selected = !probe_req_ssids->get(i).selected;
 
-          // Change selection status of menu node
-          MenuNode new_node = current_menu->list->get(i + 1);
-          new_node.selected = !current_menu->list->get(i + 1).selected;
-          current_menu->list->set(i + 1, new_node);
-
-          probe_req_ssids->set(i, new_ssid);
+           lv_disp_drv_t disp_drv;
+           lv_disp_drv_init(&disp_drv);
+           // Make LVGL use the actual TFT dimensions so widgets (keyboard) match orientation
+           extern Display display_obj;
+           disp_drv.hor_res = display_obj.tft.width();
+           disp_drv.ver_res = display_obj.tft.height();
         },
         probe_req_ssids->get(i).selected);
     }
@@ -3263,22 +3359,35 @@ void MenuFunctions::buildButtons(Menu *menu, int starting_index, String button_n
   }
 
   // Bottom touch controls: three side-by-side boxes for Up | OK | Down
+  // Skip creating these when LVGL full-screen interfaces are active
   {
-    // make touch targets taller for easier tapping and centered horizontally
-    uint16_t btn_w = TFT_WIDTH / 3;
-    uint16_t btn_h = KEY_H + 12; // increase height for better touch
-    uint16_t btn_y = TFT_HEIGHT - btn_h - 4; // 4px bottom margin
+    extern WiFiScan wifi_scan_obj;
+    if ((wifi_scan_obj.currentScanMode == LV_JOIN_WIFI) || (wifi_scan_obj.currentScanMode == LV_ADD_SSID)) {
+      // LVGL keyboard/fullscreen UI will draw its own controls — don't create the bottom zones
+      return;
+    }
+    // make touch targets a bit taller for easier tapping and ensure
+    // equal spacing between left edge, buttons and right edge.
+    // We compute a small spacing and derive a button width that
+    // yields equal outer margins and inter-button spacing.
+    uint16_t spacing = 8; // desired spacing (px)
+    uint16_t btn_h = KEY_H + 20; // taller for easier touch
+    // Compute button width so: 3*btn_w + 4*spacing == TFT_WIDTH
+    uint16_t btn_w = 0;
+    if (TFT_WIDTH > spacing * 4)
+      btn_w = (TFT_WIDTH - (spacing * 4)) / 3;
+    else
+      btn_w = TFT_WIDTH / 3;
 
-    // compute a small left margin so the 3 buttons are perfectly centered
-    uint16_t total_w = btn_w * 3;
-    uint16_t left_margin = (TFT_WIDTH > total_w) ? ((TFT_WIDTH - total_w) / 2) : 0;
+    uint16_t btn_y = TFT_HEIGHT - btn_h - 6; // bottom margin
+    uint16_t left_margin = spacing; // equal outer margin
 
     // Left = UP (index 0), Middle = OK (index 1), Right = DOWN (index 2)
     const char *labels[3] = { "Up", "OK", "Down" };
 
     for (int j = 0; j < 3; j++) {
       // TFT_eSPI_Button in this project expects x,y to be the button center
-      uint16_t cx = left_margin + j * btn_w + (btn_w / 2); // center x
+      uint16_t cx = left_margin + j * (btn_w + spacing) + (btn_w / 2); // center x
       uint16_t cy = btn_y + (btn_h / 2); // center y
       uint16_t idx = BUTTON_ARRAY_LEN + j;
       // Use same outline and fill color to minimize visible border thickness
